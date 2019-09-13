@@ -1,0 +1,1445 @@
+Adaptive Bidding for Display Advertising
+Arpita Ghosh
+Yahoo! Research
+2821 Mission College Blvd.
+Santa Clara, CA 95054
+arpita@yahoo-inc.com
+Benjamin I. P. Rubinstein
+Computer Science Division
+University of California, Berkeley
+Berkeley, CA 94720
+benr@cs.berkeley.edu
+Sergei Vassilvitskii
+Yahoo! Research
+111 West 40th St., 17th Floor
+New York, NY 10018
+sergei@yahoo-inc.com
+Martin Zinkevich
+Yahoo! Research
+2821 Mission College Blvd.
+Santa Clara, CA 95054
+maz@yahoo-inc.com
+ABSTRACT
+Motivated by the emergence of auction-based marketplaces
+for display ads such as the Right Media Exchange, we study
+the design of a bidding agent that implements a display ad-
+vertising campaign by bidding in such a marketplace. The
+bidding agent must acquire a given number of impressions
+with a given target spend, when the highest external bid in
+the marketplace is drawn from an unknown distribution P.
+The quantity and spend constraints arise from the fact that
+display ads are usually sold on a CPM basis. We consider
+both the full information setting, where the winning price
+in each auction is announced publicly, and the partially ob-
+servable setting where only the winner obtains information
+about the distribution; these differ in the penalty incurred
+by the agent while attempting to learn the distribution. We
+provide algorithms for both settings, and prove performance
+guarantees using bounds on uniform closeness from statis-
+tics, and techniques from online learning. We experimen-
+tally evaluate these algorithms: both algorithms perform
+very well with respect to both target quantity and spend;
+further, our algorithm for the partially observable case per-
+forms nearly as well as that for the fully observable setting
+despite the higher penalty incurred during learning.
+Categories and Subject Descriptors
+F.2.0 [Analysis of Algorithms and Problem Complex-
+ity]: General; J.4 [Social and Behavioral Sciences]: Eco-
+nomics; I.2.6 [Artificial Intelligence]: Learning
+General Terms
+Algorithms, Economics, Theory
+Keywords
+Display advertising, guaranteed delivery, adaptive bidding,
+guess-then-double algorithms, concentration bounds
+Copyright is held by the International World Wide Web Conference Com-
+mittee (IW3C2). Distribution of these papers is limited to classroom use,
+and personal use by others.
+WWW 2009, April 20–24, 2009, Madrid, Spain.
+ACM 978-1-60558-487-4/09/04.
+1. INTRODUCTION
+A bidding agent is an entity that implements an online
+advertising campaign by bidding in ad auctions on behalf
+of an advertiser. A recent development in Web advertising
+is the emergence of an auction-based marketplace for dis-
+play ads, where advertisers can bid on individual display
+advertising opportunities in real time auctions, as in spon-
+sored search. Such a marketplace allows advertisers greater
+flexibility in the design and implementation of their display
+advertising campaigns, which were previously restricted to
+contracts with publishers at pre-negotiated prices. In this
+paper, we study the design of bidding agents for display ad-
+vertising, which implement an ad campaign by bidding in
+such an auction-based marketplace. The bidding agent in
+question could either be an advertiser herself, or an inter-
+mediary acting on behalf of the advertiser.
+Since display advertising is usually sold on a per impres-
+sion (CPM) basis, a campaign for display advertising has
+different goals and metrics than one for sponsored search [2].
+A CPM-based campaign typically has a target quantity of
+impressions that need to be acquired over a certain duration
+with certain targeting characteristics (the targeting can in-
+clude information both about the webpage on which the ad
+will appear, as well as the user viewing the page). In addi-
+tion to the target quantity, a typical constraint in a CPM
+campaign is a budget constraint on the total spend, since
+payment is made on a CPM rather than a per click (CPC)
+basis. We will assume that the bidding agent wants to ex-
+haust, rather than simply stay within, the allocated budget,
+for the following reason. Different advertisers often have dif-
+ferent pieces of information regarding how valuable a partic-
+ular user might be, and often a high bid for an impression
+reflects this information; thus a high price might indicate
+high value1. This also agrees with anecdotal observations
+that advertisers prefer to exhaust their budgets.
+Consider a bidding agent that needs to win d impressions
+and has a total budget T . We assume that the bidding agent
+knows the total supply n of impressions satisfying the tar-
+1We assume that an intermediary implementing a campaign
+on behalf of an advertiser would also like to deliver high-
+value impressions subject to the chosen budget. Since our al-
+gorithms target supply over budget when they are not simul-
+taneously feasible, the intermediary can deliver the cheapest
+impressions if desired by choosing a small enough budget.
+WWW 2009 MADRID! Track: Internet Monetization / Session: Web Monetization
+251
+geting requirements (this is clearly not true in practice, but
+a lower bound on the supply can be used instead). Define
+f = d/n to be the fraction of the supply that the agent
+needs to win, and define t = T/d to be target spend per im-
+pression won. We suppose that the highest bids from other
+bidders are drawn i.i.d.2 from a distribution with CDF P,
+and that each impression is sold using a second price auction.
+In general, a given target quantity and spend need not be
+simultaneously feasible for the distribution P—if this hap-
+pens, we always choose in favor of quantity (our algorithms
+can be modified to make the opposite choice).
+If the distribution P is known to the bidding agent, then
+the problem is simple (under weak conditions described in
+Section 2). Let z? = P−1(f) be the bid that would win frac-
+tion f of the supply. Define p? such that EP [X |X ≤ p? ] = t,
+that is, p? is the bid that achieves the target spend t in
+expectation. If z? ≤ p? then bidding p? with probability
+A = f/P(p?) independently on each available impression
+achieves both the supply and spend targets in expectation.
+Otherwise, prioritizing supply, we bid z? achieving the de-
+sired fraction of supply in expectation.
+In practice, of course, the distribution P is not known to
+the bidding agent. Our problem is therefore one of learn-
+ing the unknown distribution P in order to meet the target
+quantity and spend constraints. However, learning incurs a
+penalty, leading to an explore-exploit tradeoff. The nature
+of the penalty depends on the assumptions made about the
+extent of information available to the bidding agent. We
+consider two settings:
+• Fully Observable Exchange. Here, the winning bid
+in each auction is announced publicly, so that the bid-
+ding agent can learn without placing any bids and
+therefore expending any budget. The only tradeoff
+here is between accuracy and length of exploration,
+which could affect feasibility during exploitation.
+• Partially Observable Exchange. A harder problem
+is when the winning bid is not announced publicly—
+only the winner receives information about the price
+and therefore the distribution (a realistic setting in
+online advertising). Thus the bidding agent can infer
+information about P only by bidding high enough to
+win, i.e., it must pay for every sample it observes from
+the distribution.
+We begin in Section 2 with algorithm Learn-Then-Bid for
+the fully observable case, and provide performance guaran-
+tees using non-asymptotic uniform convergence results for
+empirical processes. While the algorithm is simple—it ob-
+serves and then bids according to the empirical distribution,
+the analysis is a useful first step for the partially observable
+case. A natural improvement is to continue to learn while
+exploiting; this algorithm indeed outperforms Learn-Then-
+Bid as shown experimentally in Section 4.
+In Section 3 we move on to the partially observable case,
+which is harder since a cost must be paid for every bid that
+is observed from the distribution. We give an algorithm
+Guess-Double-Panic that explores the distribution gradually
+based on a guess-then-double pattern, in order to control the
+spend in the learning phase. A simple guess-then-double
+algorithm does not suffice since the distribution may have
+mass concentrated right above a guess, leading to severe
+2See Section 5 for a discussion.
+overspending upon doubling. We introduce a panic phase
+to the algorithm to deal with this problem, which limits the
+overspending and admits performance guarantees.
+In Section 4 we experimentally evaluate these algorithms,
+as well as some additional heuristics, on realistic data de-
+rived from the Right Media Exchange. Both Learn-Then-
+Bid (and its improved version Learn-While-Bid) and Guess-
+Double-Panic perform very well for a wide range of target
+fractions and spends. The experiments also demonstrate
+that natural heuristics for the partially observable case are
+indeed inadequate, and are well outperformed by Guess-
+Double-Panic. Most interestingly, the lack of full infor-
+mation is not a severe handicap: Guess-Double-Panic does
+nearly as well as Learn-Then-Bid despite access to only par-
+tial information.
+Related work: Although there are many commercial
+ventures that optimize campaigns on behalf of advertisers,
+the design and analysis of bidding agents for online adver-
+tising has not received much attention in the research lit-
+erature. The focus has largely been on bidding agents for
+sponsored search keyword auctions—for instance, Cary et
+al. [2] propose and analyze a pragmatic bidding agent for
+sponsored search. Unlike display advertising, the goal there
+is to choose the optimal (utility maximizing) slot to bid on
+for each keyword; the authors show that there is a greedy
+bidding strategy that leads to convergence to equilibrium
+when all advertisers use the same strategy.
+In this paper, we consider approaches inspired by online
+learning (cf. [3] for a survey). In particular, our results
+are similar to those on the multi-armed bandit algorithm
+UCB1 [1] where there is an unknown stationary distribu-
+tion over events from round to round; we do almost as well
+asymptotically as we would had the distribution been known
+in advance. However, although this work has been extended
+to uncountably infinite action spaces [5], it differs in two ma-
+jor factors: we try to get the correct average behavior (i.e.,
+to behave correctly on average). Regret is inappropriate for
+this setting: bids going over budget result in a payoff of −∞.
+Second, the expected price obtained on a given round as a
+function of the bid (roughly analogous to cost in [6]) is not
+only non-convex, but there is also no pre-determined Lips-
+chitz constant K, making discretization of the action space
+unboundedly inefficient as a method of approximation. As
+an alternative, we focus on the specific properties of the
+problem to more efficiently explore and exploit.
+2. FULLY OBSERVABLE EXCHANGE
+We first consider a fully observable exchange where the
+winning bid is revealed after every auction. After describing
+the algorithm we use the DKW inequality to bound the error
+on our estimates and the suboptimality of our performance.
+Learn-Then-Bid takes as input a target fraction f , spend
+t, supply n and exploration length m. It explores for m steps
+by bidding 0, that is, simply waiting and forms the empirical
+CDF Pm from the observations Ei ∼ P. It then computes
+bid value3 P ?m that would achieve the target spend t, and
+Z?m that would achieve the necessary fraction, and bids P
+?
+m
+with probability Am if is feasible to achieve both targets on
+Pm, else it bids Z?m.
+We prove that the expected future fraction of impressions
+won and amount spent per impression by Learn-Then-Bid
+3We follow the convention that inf ∅ := +∞.
+WWW 2009 MADRID! Track: Internet Monetization / Session: Web Monetization
+252
+Algorithm Learn-Then-Bid(f, t, n,m)
+1: Bid 0 for the first m opportunities;
+2: Pm(x)← m−1
+∑m
+i=1 1 [Ei ≤ x];
+3: P ?m ← inf {p : EPm [X |X ≤ p ] ≥ t}
+4: Am ← fn(n−m)Pm(P?m)
+5: Z?m ← inf
+{
+z : Pm(z) ≥ fnn−m
+}
+6: if P ?m ≥ Z
+?
+m then
+7: for opportunities i ∈ {m+ 1, . . . , n} do
+8: Bid P ?m with probability Am, and 0 otherwise.
+9: else
+10: for opportunities i ∈ {m+ 1, . . . , n} do Bid Z?m.
+11: end if
+converge in probability with rates exponential in the learning
+phase length.
+We assume that the distribution P is continuous, strictly
+monotonic, has support on [a, b] where 0 ≤ a < b < ∞ and
+P(a) = 0. This implies that g(y) = EP [X |X ≤ y ] is well-
+defined, continuous and strictly increasing over [a, b], and so
+P−1 and g−1 are well-defined also.
+Many of the results we obtain depend upon the problem
+being feasible after exploration. In Section 4 we show ex-
+perimentally that m can be chosen small enough so that
+the problem remains feasible for most f and t. Moreover in
+normal scenarios, one needs a small number of impressions
+and has a small budget, and the total number of impressions
+tends to be large.
+Definition 1. Define γ = fnn−m . If t ≤ EP [X], define
+p? = g−1(t). A problem is feasible after exploration if
+t ≤ EP [X] and P(p?) ≥ γ.
+Note that this also implies γ ≤ 1. We will refer to γ and p?
+throughout this section as defined above.
+2.1 Measurement Errors
+The performance of the algorithm depends primarily upon
+the accuracy of the exploration phase measurements.
+Definition 2. For a given  > 0, the algorithm has -
+accurate observations if for all x ∈ [a, b]:
+|P(x)− Pm(x)| ≤  . (1)
+The following is a restatement of the DKW inequality [4].
+For the remainder of the analysis, we will condition our re-
+sults on the observations being -accurate.
+Corollary 3. For  > 0, the probability of the algorithm
+having -accurate observations is greater than or equal to
+1− 2 exp
+(
+−2m2
+)
+.
+We next link -accuracy to the expected fraction of supply
+won when bidding Z?m.
+Lemma 4. Given  > 0, if the problem is feasible after ex-
+ploration, and the Learn-Then-Bid algorithm has -accurate
+observations then
+|P(Z?m)− γ| ≤  . (2)
+Proof. We first consider bidding Z?m on each round of
+the bidding phase; our goal is to prove that the expected
+fraction won P(Z?m) is close to the target fraction γ w.h.p. If
+γ ≤ , then P(Z?m) ≥ 0 ≥ γ− . If γ > , then (0, γ− ] 6= ∅,
+and for any ′ ∈ (0, γ − ], define z?− = P−1(γ −  − ′).
+Because the algorithm has -accurate observations:
+Pm
+(
+z?−
+)
+≤ P
+(
+z?−
+)
++  = γ − ′
+< γ ≤ Pm (Z
+?
+m) ,
+and so z?− < Z?m by the monotonicity
+4 of Pm. Therefore,
+for all ′ ∈ (0, γ− ], P(Z?m) > P(z
+?−) = γ− − ′, implying
+P(Z?m) ≥ γ− . By a similar argument, P(Z
+?
+m) ≤ γ + .
+2.2 Approximation of Target Supply Won
+Our first main result states that Learn-Then-Bid wins
+close to fn opportunities, if the algorithm has -accurate
+observations and the problem is feasible after exploration.
+The following lemma is a consequence of a positive partial
+derivative.
+Lemma 5. For γ,  > 0, xγ(x+)−1 is strictly increasing,
+and xγ(x− )−1 is strictly decreasing.
+Theorem 6. Given  > 0, and j > m, let Bj be the
+jth bid of the Learn-Then-Bid algorithm. If the problem is
+feasible after exploration and the algorithm has -accurate
+observations, then:
+γ −  ≤ E[P(Bj)|E1 . . . Em] ≤
+γ − 
+γ − 2
+γ . (3)
+Proof. From Lemma 4, we know that |P(Z?m)− γ| ≤ .
+If Z?m ≥ P
+?
+m and therefore Bj = Z
+?
+m, then γ −  ≤ P(Bj) ≤
+γ +  ≤ γ−γ−2γ. Therefore for the remainder of the proof we
+assume that P(P ?m) ≥ P(Z
+?
+m) ≥ γ − .
+In this case, Bj = P ?m with probability Am, and zero
+otherwise (P(0) = 0). The conditional probability of win-
+ning bid j given the outcome of the exploration phase is
+P(P ?m)Am: it is this value we wish to show is close to the
+target γ:
+P(P ?m)Am =
+P(P ?m)
+Pm(P ?m)
+γ ≥
+P(P ?m)
+P(P ?m) + 
+γ ≥
+γ − 
+γ
+γ .
+The first equality follows by definition of Am, the first in-
+equality follows due to the -accurate observations, and the
+final inequality is a consequence of Lemma 5 and the in-
+equality P(P ?m) ≥ P(Z
+?
+m) ≥ γ − . We upper-bound the
+expected fraction won in a similar fashion:
+P(P ?m)
+Pm(P ?m)
+γ ≤
+P(P ?m)
+P(P ?m)− 
+γ ≤
+γ − 
+γ − 2
+γ .
+2.3 Approximation of Target Spend
+Our second theorem establishes that Learn-Then-Bid
+spends close to budget if the observations are -accurate and
+the problem is feasible after exploration. To prove this, we
+first convert DKW-type uniform closeness of true and em-
+pirical CDFs to uniform closeness of expected spend. This
+“uniformity” is gained by focusing only on the area of inter-
+est, bids that obtain at least γ −  impressions.
+For a given  ∈ (0, γ/2), define − = b(γ−)(γ−2) +
+(b−a)
+γ−2 ,
+and + = bγ(γ−) +
+(b−a)
+γ .
+4It is important that Pm(z?−) is strictly less than Pm(Z?m)
+because Pm is weakly monotonic, thus the need for ′ > 0.
+WWW 2009 MADRID! Track: Internet Monetization / Session: Web Monetization
+253
+Lemma 7. Given  ∈ (0, γ/2), let z?− = P−1(γ − ) and
+define the function gm(y) = EPm [X |X ≤ y ]. If the algo-
+rithm has -accurate observations , then if Y ≥ z?−:
+gm(Y )− 
+− ≤ g(Y ) ≤ gm(Y ) + 
++ .
+Proof. Because the algorithm has -accurate observa-
+tions, both of the following relations hold5 for all y ∈ [a, b]:
+|P(y)− Pm(y)| ≤ 
+∣
+∣
+∣
+∣
+∫ y
+a
+(1− P(x)) dx−
+∫ y
+a
+(1− Pm(x)) dx
+∣
+∣
+∣
+∣ ≤ (b− a) .
+Lower-bounding gm(Y ) with the above relations, identity
+d
+c+ =
+d
+c −
+d
+c(c+) , and P(Y ) ≥ P(z
+?−) = γ − :
+gm(Y ) =
+a+
+∫ Y
+a (1− Pm(x)) dx
+Pm(Y )
+≥
+a+
+∫ Y
+a (1− P(x)) dx
+P(Y ) + 
+−
+(b− a)
+P(Y ) + 
+= g(Y )−
+(a+
+∫ Y
+a (1− P(x)) dx)
+P(Y )(P(Y ) + )
+−
+(b− a)
+P(Y ) + 
+≥ g(Y )−
+b
+γ(γ − )
+−
+(b− a)
+γ
+. (4)
+Upper-bounding gm(Y ) proceeds by the same arguments
+and identity dc− =
+d
+c +
+d
+c(c−) .
+Theorem 8. Given the problem is feasible and  ∈ (0, γ/2),
+if the algorithm has -accurate observations, j > m and Bj
+is the jth bid and Bj > 0, then: t− − ≤ g(Bj) ≤ t+ +.
+Proof.
+t− − ≤ g(max(Z?m, P
+?
+m)) ≤ t+ 
++ . (5)
+Note that if j > m and Bj > 0 then Bj = g(max(Z?m, P
+?
+m)).
+As with Lemma 4, we need to analyze values that bracket
+the value of interest. In particular, the first value of interest
+is z?− = P−1(γ − ). If g(z?−) ≥ t− −, then by Lemma 4,
+max(Z?m, P
+?
+m) ≥ Z
+?
+m ≥ z
+?−, and by the monotonicity of
+g, g(max(Z?m, P
+?
+m)) ≥ g(z
+?−) ≥ t − −. Therefore, we can
+assume that g(z?−) < t−−. Since t > t−− > g(z?−) ≥ a,
+t − − is in the range of g and g−1(t − −) ≥ z?−. For
+′ ∈ (0, t− − − a], define p?− = g−1(t− − − ′).
+gm(p
+?−) ≤ g(p?−)−  = t− ′
+< t ≤ gm(P
+?
+m) ,
+so p?− ≤ P ?m. Therefore, because g is monotonically in-
+creasing, for any ′ > 0, t − − − ′ ≤ g(P ?m), implying
+t− − ≤ g(P ?m) ≤ g(max(Z
+?
+m, P
+?
+m)). By a similar argument,
+t+ + ≥ g(P ?m).
+From Corollary 3 the algorithm has -accurate observations
+with probability 1 − 2 exp
+(
+−2n2
+)
+. Combining this with
+Theorems 6 and 8 proves that Learn-Then-Bid ’s performance
+converges to the targets in probability with fast rates:
+Theorem 9. Given a problem that is feasible after explo-
+ration. If  ∈ (0, γ/2): With probability 1− 2 exp
+(
+−2n2
+)
+:
+t− − ≤ g(Bj) ≤ t+ 
++ if Bj > 0 (6)
+γ −  ≤ E[P(Bj)|e1 . . . em] ≤
+γ − 
+γ − 2
+γ . (7)
+5The integrals are well-defined because P and Pm are
+bounded, monotonic functions.
+3. PARTIALLYOBSERVABLEEXCHANGE
+We now move on to the partially observable case, where
+information is revealed only to an auction’s winner. This
+problem is more difficult because the bidder must pay a cost
+in order to obtain information; specifically, we cannot simply
+learn about the auction by bidding zero for a while. The
+most brute force approach is to bid ∞ for an exploration
+period, but that can cause overspending by almost b/t when
+the target fraction is small. In this section, we will try to
+be approximately optimal. If b/t is small then we can bid b:
+however, we also want to handle the case where b/t is large.
+Consider a simple algorithm that works rather well: bid 2t
+blindly until the correct number of impressions are obtained.
+Observe that since the minimum bid to get fn impressions
+is less than the bid that gets an expected price of t, then the
+expected price paid when a bid is made which obtains fn is
+less than or equal to t. Therefore, by Markov’s inequality,
+the number of the lowest fn impressions below 2t is fn/2.
+Moreover, the most that one can spend is 2tfn, and since
+the budget is tfn, this is only twice the budget. Therefore,
+this algorithm will not dramatically overspend and it will
+obtain half the required impressions.
+Instead of either of these extremes (bidding 2t blindly or
+aggressively exploring with b), we will apply the guess-then-
+double pattern. This approach is used in a variety of do-
+mains. For instance, if we want to create an array of items
+but do not know how many elements it will contain, we make
+a guess, and if we need more space, we double the size of the
+array. Thus, the number of new allocations is logarithmic in
+the number of elements entered, and the number of copies
+is linear, and the size may be off by no more than a factor
+of two. Of course, doubling is only one possibility: in the
+case of the array, multiplying by a factor φ smaller than 2
+will result in more copies but greater efficiency in space.
+In the Guess-Double-Panic algorithm, we apply a modi-
+fication of this technique to bids in the exploration phase.
+We will refer to a bid being used during exploration as an
+exploration bid. A “safe” bid6 is t, the target spend, since
+there is no danger of going over budget. From this point, we
+exponentially increase our exploration bid, exploring enough
+with each new bid to learn the distribution below this bid.
+At some point we notice our exploration bid exceeds p?.
+A na¨ıve approach is to simply test for this condition at
+each iteration, and then react to our experience at the end
+of each phase of the exploration (i.e., remove lines 8-9). How-
+ever, this can result in a large amount of overspending, as
+the following example shows.7 The target price is 10 cents
+and we need to obtain 10% of the 1000 impressions. There-
+fore, we are searching for 100 impressions for $10.00 total.
+The distribution of bids is: 9.9% are at 1 cent. 0.1% are
+at $9.01. Finally, the remaining 90% of the bids are at
+$10.00. An ideal bid is $9.01. However, it is difficult to
+say whether this one bid will be observed. Unless there is a
+very slow exploration, the bids will likely exceed $10.00 dur-
+ing exploration. Thus, there will be a high penalty where
+the algorithm will most likely pay 10 times its budget.
+Instead, if we start overspending during the exploration
+phase, we go to the Panic() subroutine, where we move into
+6There is also the possibility that we underspend. This can
+happen if we get many opportunities while we are bidding
+too low. However, this is not a problem so long as the ex-
+ploration period is sufficiently short with respect to γn.
+7A similar continuous distribution is easy to construct.
+WWW 2009 MADRID! Track: Internet Monetization / Session: Web Monetization
+254
+a new phase of “cautious exploration”. Effectively, if we are
+overspending, then we momentarily ignore the budget, and
+target solely the number of impressions obtained. As before,
+we continue to increase the bids, but if we realize that we
+can get enough impressions in the exploitation phase, we
+immediately move on to the exploitation phase.
+The algorithm continues to explore (or panic) until it finds
+a price Bi? where it estimates its budget can be exhausted
+and it can win enough impressions (or it has explored at
+b or above). As with the observable case, we have a good
+approximation of the outcome of bidding any price below
+Bi? as we leave the exploration phase.
+In particular, there are now three modes of operation.
+The first mode is exploration: the algorithm explores until
+it either gets enough information or the budget becomes
+tight. The second (optional) mode is panic: the budget is
+tight, but the algorithm does not have enough information
+to obtain the right number of impressions, so it aggressively
+grabs impressions until it reaches a more stable scenario.
+The third stage is exploitation. In the exploitation stage,
+if there is sufficient budget to obtain the right number of
+impressions, then the algorithm tries to exhaust the budget.
+Otherwise, it is thrifty and tries to get the right number of
+impressions at a discount price.
+For the following algorithm, all variables are global.
+Algorithm Guess-Double-Panic(f, t, n,m, φ)
+1: Initialize: gremain ← fn; budget← tgremain
+2: Initialize: P0 ← 0; T0 ← 0; B0 ← 0; i← 0; j ← 0
+3: while (Tigremain < budget or Pi(n− j) < gremain) and
+Bi < b do
+4: i← i+ 1.
+5: Bi ← t(φ)i−1.
+6: Si ← ∅ to be a multiset.
+7: for k = 1 to m do
+8: if (gremain − 1)Ti−1 +Bi−1 > budget then
+9: return Panic()
+10: j ← j + 1.
+11: if gremain = 0 then Terminate.
+12: Bid Bi.
+13: if Bid wins then
+14: Define pj ← price won.
+15: gremain ← gremain − 1.
+16: budget← budget− pj .
+17: Add pj to Si.
+18: end if
+19: end for
+20: if Si 6= ∅ then Ti ← 1|Si|
+∑
+p∈Si
+p else Ti ← 0.
+21: Pi ←
+|Si|
+m .
+22: end while
+23: i? ← i.
+24: return Exploit().
+The first danger of using any exploration technique is
+that the problem may be unsolvable if one spends too much
+time exploring. Note that there will be no more than r =
+dlogφ(b/t)e+ 1 rounds of exploration, because then the bid
+will be above b. In each round, there are m bids, so mr is
+the maximum number of steps of exploration.
+Definition 10. Define γ = fnn−mr . If t ≤ EP [X], define
+p? = g−1(t). A problem is feasible after exploration if
+t ≤ EP [X] and P(p?) ≥ γ. (Again, this implies γ ≤ 1.)
+Subroutine Panic
+25: while Bi−1 < b do
+26: while k ≤ m do
+27: if gremain < Pi−1(n− j) then
+28: i? ← i− 1.
+29: return Exploit().
+30: end if
+31: j ← j + 1.
+32: Bid Bi.
+33: if Bid wins then
+34: Define pj ← price won.
+35: gremain ← gremain − 1.
+36: budget← budget− pj .
+37: Add pj to Si.
+38: end if
+39: k ← k + 1.
+40: end while
+41: k ← 1.
+42: if Si 6= ∅ then Ti ← 1|Si|
+∑
+p∈Si
+p else Ti ← 0.
+43: Pi ←
+|Si|
+m .
+44: i← i+ 1.
+45: Bi = t(φ)i−1.
+46: Si ← ∅ to be a multiset.
+47: end while
+48: i? ← i− 1.
+49: return Exploit().
+Let us consider the period that generated Si. Define S?i
+to be the multiset of all prices (observed and unobserved)
+during this period (clearly not an observed set). As in the
+observed case, there are several observations we could make
+about this distribution (although in this case only theoreti-
+cally). Formally, define:
+Pim(x) = m
+−1|{y ∈ S?i |y ≤ x}| . (8)
+Moreover, we can look at these independently from the al-
+gorithm itself.
+Definition 11. The algorithm has -accurate observa-
+tions if for each i ∈ {1 . . . r}, argmaxx∈[a,b] |P
+i
+m(x)−P(x)| ≤
+.
+Lemma 12. The probability of not having -accurate ob-
+servations is at most 2(dlogφ(b/t)e+ 1) exp
+(
+−2m2
+)
+.
+The probability of -accurate observations can be deter-
+mined by applying the DKW inequality to each round of
+exploration/panicking, and then applying a union bound.
+Define Cexplore, Cpanic and Cexploit to be the spend dur-
+ing exploration, panic and exploitation, respectively. Define
+nexplore, npanic and nexploit to be the number of impressions
+won during exploration, panic and exploitation phases, re-
+spectively. Define m′ to be the number of opportunities
+during the exploration and panic phases combined. De-
+fine n?exploit to be the target number of impressions that
+remain after the exploration and panic phases. Note that
+this is equal to gremain at the beginning of the exploitation
+phase. Instead of targeting γ as we did before, we are tar-
+geting γ′ =
+n?exploit
+n−m′ , where γ
+′ ≤ γ because n?exploit ≤ fn
+and m′ ≤ mr, implying that γ′ ≤ 1. Because the number
+of impressions obtained is a priority, the proof that this is
+achieved is fairly straightforward. The spend we will bound
+is C = Cexplore + Cpanic + E[Cexploit|E1 . . . Em′ ].
+WWW 2009 MADRID! Track: Internet Monetization / Session: Web Monetization
+255
+Subroutine Exploit
+50: If gremain ≤ 0 or j ≥ n then Terminate.
+51: Bfinal ← Bi? .
+52: A← gremainPi? (n−j) .
+53: if Pi?(n− j) > gremain and Ti?gremain > budget then
+54: Sort p ∈ Si? : define qk to be the kth smallest p in Si? .
+55: ks ←
+⌈
+gremain
+n−j m
+⌉
+56: for k = 1 to |Si? | do gk ← 1k
+∑k
+i=1 qi.
+57: t? ← budgetgremain .
+58: kp ← mink:gk≥t? k.
+59: k? ← max(ks, kp).
+60: Bfinal ← qk? .
+61: A← k
+?
+m .
+62: A← gremainA(n−j) .
+63: end if
+64: while More rounds and gremain > 0 do
+65: Bid Bfinal with probability A, 0 otherwise.
+66: If Bid won then gremain ← gremain − 1.
+67: end while
+Theorem 13. If the problem is feasible after exploration,
+and the algorithm has -accurate observations, then:
+fn ≥ nexplore + npanic + (n−m
+′)P(Bfinal)A ≥ fn−  ,
+where Bfinal and A are as in Line 65.
+Proof. The upper bound is true because there is always
+a check that gremain > 0 before any bid is made. The proof
+of the lower bound has the same rough outline as Theorem 6.
+qks is analogous to Z
+?
+m, and qkp is analogous to P
+?
+m. Now
+the target fraction of impressions to win during exploitation
+may be lower than γ, due to some being won during the ex-
+ploration and panic. However, it is still easy to prove that
+|P(qks) − γ
+′| ≤  using techniques similar to Lemma 4, be-
+cause the proof does not depend upon the target. The most
+serious issue is when kp ≥ ks (analogous to P ?m ≥ Z
+?
+m), there
+is no implicit lower bound on P(qkp) outside of γ
+′. This
+makes the upper bounds that we obtained in Theorem 6
+impossible to obtain, and why we explicitly bound the num-
+ber of impressions obtained from above. However, the lower
+bounds on AP(qkp) work out just as in Theorem 6.
+3.1 Bounding the Amount Spent
+We prove an upper bound on the spend of the algorithm.
+Theorem 14. If the algorithm has -accurate observa-
+tions and the problem is feasible after exploration, then C ≤
+φtfn+ (1/3 + 2/3)nb.
+Proof. With Lemmas 15-21, we cover overspending based
+upon every outcome of exploration and panic, as well as the
+relationship between ks and kp. In particular:
+1. If the algorithm exits exploration on Line 24, then
+Lemma 15 applies if kp ≥ ks, and Lemma 21 applies if
+kp < ks.
+2. If the algorithm exits exploration on Line 11, then
+Lemma 16 applies.
+3. If the algorithm exits exploration on Line 9, then
+Lemma 17 applies if no panic bids are made, Lemma 18
+applies if a panic bid of Bi?+1 is made, Lemma 20 ap-
+plies if the largest panic bid is Bi? and kp ≤ ks, and
+Lemma 19 applies if kp > ks.
+Lemma 15. If the algorithm exits the exploration phase
+at Line 24, the algorithm has -accurate observations, the
+problem is feasible after exploration, and kp ≥ ks, then the
+amount overspent is less than C ≤ tfn+ (1/3 + 2/3)bn.
+Proof. As before, if a large fraction of the impressions
+remains, then the estimates will be accurate. On the other
+hand, if many of the impressions are already gone, the im-
+pact of making a mistake is less.
+We choose a point, γ? = 1/3+, as a threshold: if γ′ > γ?,
+we can bound the spend normally. If γ′ ≤ γ?, then the most
+we can spend is γ?b.
+As we consider the bound proven in Lemma 7, if we replace
+γ with γ? in Equation 4, then we get:
+gm(Y ) ≥ g(Y )−
+b
+γ?(γ? − )
+−
+(b− a)
+γ?
+(9)
+= g(Y )−
+b
+(+ 1/3)(1/3)
+−
+(b− a)
+1/3
+(10)
+≥ g(Y )− 1/3b− 2/3(b− a) (11)
+≥ g(Y )− 1/3b− 2/3b . (12)
+Equation 12 follows because decreasing the denominator
+(replacing +1/3 with ) makes the term larger, but making
+a negative term larger makes the overall expression smaller.
+Also, since  ≤ 1, 2/3 ≥ , implying γ′b ≤ 1/3b+ 2/3b.
+Lemma 16. If exploration exits due to Line 11, then C ≤
+φtfn .
+Proof. Define B? to be equal to budget at the last time
+Line 8 was visited. This is the ideal amount to bid on the
+last bid such that the budget is exactly met. The maximum
+amount that could be bid would be Bi. Before the last bid
+was made, gremain = 1 and (due to Line 8), Bi−1 ≤ B?.
+Therefore, Bi ≤ φB?. The maximum amount overspent
+would be Bi − B? ≤ (φ − 1). Since B? ≤ tfn, the result
+follows.
+Lemma 17. If exploration exits on Line 9, and no panic
+bids (Line 32) are made, then C ≤ φtfn+ (1/3 + 2/3)nb.
+Proof. During the middle of an exploration phase, an
+impression is won (which we will call the overpriced im-
+pression) and Line 8 is true. Define pop to be the price of
+this bid. At the time when the expression in Line 8 is true:
+tfn− budget = Cexplore + Cpanic (13)
+gremain = n
+?
+exploit . (14)
+Consider the last time that Line 8 is false, i.e.when one less
+impression was won and pop less was spent.
+tfn− budget = Cexplore + Cpanic − pop (15)
+gremain − 1 = n
+?
+exploit (16)
+(gremain − 1)Ti−1 +Bi−1 ≤ budget (17)
+(n?exploit)Ti−1 +Bi−1
+≤ tfn+ pop − (Cexplore + Cpanic) . (18)
+In this case, since we go through panic, at this time i−1 = i?,
+we can reframe this as a bound on the “spend”:
+Cexplore + Cpanic + (n
+?
+exploit)Ti? ≤ tfn+ pop −Bi? .
+Because pop −Bi? ≤ (φ− 1)Bi? ≤ (φ− 1)tfn:
+Cexplore + Cpanic + (n
+?
+exploit)Ti? ≤ φtfn . (19)
+WWW 2009 MADRID! Track: Internet Monetization / Session: Web Monetization
+256
+The final issue is that Ti? is not necessarily equal to g(Bi?)
+(even though Ti? is an estimate of g(Bi?)). The remainder is
+similar to Lemma 15. There are two scenarios: either Pi? is
+small, and therefore few impressions are left to obtain, or Pi?
+is large and Ti? is accurate. Formally, consider γ? = +1/3.
+If Pi? ≤ γ?, then because the expression in Line 27 is true,
+n?exploit ≤ nγ
+?. If Pi? ≥ γ?, then P(Bi?) ≥ γ? − , then
+substituting γ? for γ in Lemma 7:
+g(Bi?) ≤ Ti? +
+b
+γ?(γ? − )
++
+(b− a)
+γ?
+(20)
+= Ti? +
+b
+(1/3 + )(1/3)
++
+(b− a)
++ 1/3
+(21)
+≤ Ti? + 
+1/3b+ 2/3(b− a) (22)
+≤ Ti? + 
+1/3b+ 2/3b . (23)
+Summarizing:
+g(Bi?)(n
+?
+exploit) ≤ max(γ
+?nb, (Ti? + 
+1/3b+ 2/3b)fn)
+Cexplore + Cpanic + n
+?
+exploitg(Bi?) ≤
+φtfn+ max(γ?nb, (1/3b+ 2/3b)fn) .
+Because γ? = + 1/3, and f ≤ 1, the result follows.
+Lemma 18. If, during the Panic() algorithm, a bid of
+Bi?+1 is the highest bid that is actually made, the problem is
+feasible after exploration, and the algorithm has -accurate
+observations, then C ≤ fn(tφ+ b).
+Proof. During exploitation, the algorithm bids no more
+than Bi? , so the expected price per impression is at most
+g(Bi?). This is the easy part; the hard part is bound-
+ing the spend during exploration and panic. Define b? =
+min(Bi?+1, b), the largest effective bid during panicking. How
+many impressions need to obtained before the algorithm re-
+alizes it can bid Bi? for the remainder? Formally:
+max #big bids won = fn− (P(Bi?)− )(n−mr)
+= fn
+(
+1−
+(P(Bi?)− )(n−mr)
+fn
+)
+= fn
+(
+1−
+(P(Bi?)− )
+γ
+)
+= fn
+(
+γ − (P(Bi?)− )
+γ
+)
+Cpanic + Cexploit ≤ fn
+(
+γ − (P(Bi?)− )
+γ
+)
+b? .
+In other words, the maximum fraction of bids won during
+exploration and panic is (+ γ − P(Bi?)) γ−1. Note that if
+the algorithm were to bid P−1(γ) ≤ p?, then in expectation
+(γ − P(Bi?)) γ−1 bids would be Bi? or above. Therefore, if
+the problem is feasible after exploration:
+t = g(p?)
+≥ g(P−1(γ))
+≥
+γ − P(Bi?)
+γ
+Bi? +
+P(Bi?)
+γ
+g(Bi?)
+tφ ≥
+γ − P(Bi?)
+γ
+Bi?φ+
+P(Bi?)
+γ
+g(Bi?)
+≥
+γ − P(Bi?)
+γ
+b? +
+P(Bi?)
+γ
+g(Bi?)
+tφ+ b? ≥
+γ − P(Bi?)
+γ
+b? + b? +
+P(Bi?)
+γ
+g(Bi?)
+≥
++ γ − P(Bi?)
+γ
+b? +
+P(Bi?)
+γ
+g(Bi?)
+fn(tφ+ b) ≥ Cexplore + Cpanic + E[Cexploit|E1 . . . Em′ ]] .
+The last line is due to the fact that b? is a bound on the
+price during exploration and panic, g(Bi?) is a bound on
+the expected price during exploitation, and the worst-case
+scenario is to have the maximum number of bids during the
+exploration and panic phases.
+Lemma 19. If the largest panic bid is Bi? , during ex-
+ploitation ks < kp (such that the bid during exploitation is
+based upon the target spend t), the problem is feasible after
+exploration, and the algorithm has -accurate observations,
+then C ≤ tfn+ (1/3 + 2/3)bn.
+Proof Sketch. This scenario is rare, in that it implies
+that the algorithm panicked, but then somehow the budget
+recovered. One possibility is that a very high but unlikely
+bid was obtained, followed by small but unlikely bids.
+Since the last round is -accurate, the argument is similar
+to Lemma 15.
+Lemma 20. If the largest panic bid is Bi? , during ex-
+ploitation ks ≥ kp (such that the bid during exploitation is
+based upon the target number of impressions), the problem is
+feasible after exploration, and the algorithm has -accurate
+observations, then C ≤ φtfn+ nb.
+Proof Sketch. In this case, we know that P(Bi?−1) ≤
+γ + , and for however long we are exploring and panick-
+ing, we know that Bi?−1 is not expected to give us enough
+impressions, just as with Bi? in Lemma 18. If the exploita-
+tion bid B was less than or equal to Bi?−1 (e.g., due to
+a change in the estimation from Si?−1 to Si?), then the
+analysis from Lemma 18 holds, with i? − 1 replacing i?. If
+B > Bi?−1, we know that all the bids we obtained during
+exploration and panicking were not enough, and during ex-
+ploitation, we choose a bid such that we get just enough im-
+pressions above Bi?−1. Thus, these impressions above Bi?−1
+during exploitation and the impressions during exploration
+and panicking are almost exactly enough such that bidding
+Bi?−1 during exploitation would have won the remainder.
+Therefore, Lemma 18’s argument completes the result.
+Lemma 21. If the algorithm exits the exploration phase
+at Line 24, the algorithm has -accurate observations, the
+problem is feasible after exploration, and kp < ks, then C ≤
+φtfn+ (1/3 + 2/3)nb.
+Proof. This is similar to Lemma 17, in that the algo-
+rithm does not have more than one impression that is over-
+priced (note that the last impression won during exploration
+may be overpriced). Therefore, with the exception that
+i? = i, a variant of Equation 19 holds here.
+Cexplore + Cpanic + (n
+?
+exploit)Ti?−1 ≤ φtfn . (24)
+If Bfinal ≤ Bi?−1, then the argument from Lemma 17 holds,
+in that the algorithm might has well of panicked.
+WWW 2009 MADRID! Track: Internet Monetization / Session: Web Monetization
+257
+If Bfinal > Bi?−1, then the algorithm might as well have
+panicked: the key condition (that it needs more impressions
+that it believes will be obtained by Bi?−1) is satisfied at
+the end of the exploration phase, which is loosely what is
+required in Lemma 20. Note that the bound in Lemma 17
+is looser than the bound in Lemma 20.
+Unfortunately, there are cases where the algorithm can
+underspend. For instance, suppose that the objective is to
+obtain a very small number of impressions at a very high
+price. For instance, 10% of the impressions are at $11.00,
+and 90% are at $1.00, and the target spend is $2.00, and the
+algorithm wants 1% of the impressions. Therefore, bidding
+$11.00 is ideal. However, if the algorithm starts by bidding
+$2.00, it is possible that before exploration is over, the algo-
+rithm obtains enough impressions, but has only spent half
+the budget. Of course, in this case, the algorithm which
+starts by bidding b to explore is doing just the right thing.
+0
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+1
+ 
+ 
+Empirical CDFLog Normal Model CDF
+Figure 1: The observed and modeled distribution of
+the winning bid on the Right Media Exchange.
+4. EXPERIMENTS
+In this section we evaluate our algorithms on syntheti-
+cally derived data drawn from a log-normal distribution,
+which fits data observed from the Right Media Exchange.
+Algorithms for the fully observable case are evaluated in
+Section 4.2, and the partially observable case in Section 4.3.
+4.1 Methodology and Data
+To evaluate our algorithms, we collected winning bids
+from live auctions run on the Right Media Exchange, which
+has over 50,000 buyers and sellers and processes over 6 bil-
+lion impressions daily. The bids we collected represent a
+1% uniform sample across a variety of individual publish-
+ers. Focusing on a single publisher, we plot the CDF of the
+empirical distribution of the bids in Figure 1.
+While it is difficult to predict the winning bid on any par-
+ticular impression, for a fixed publisher the data can be fitted
+with a log-normal distribution with the appropriate mean
+and variance. In Figure 1 we provide such a fit for a single
+publisher (350,000 auctions total). While the exact vari-
+ance changes from publisher to publisher, on all instances
+the data can be fitted well with a log-normal distribution.
+Based on the above fit, we sample i.i.d. from a log-normal
+distribution with mean and variance one.8 While very large
+prices are never observed on the exchange, the log-normal
+distribution supports arbitrarily large prices. We deal with
+this by discarding samples larger than an upper-limit b, cho-
+sen to be the 99.7th percentile. That is, we sample from the
+log-normal distribution conditioned on {X ≤ b}.
+We set the supply to be n = 10, 000 impressions. To eval-
+uate each algorithm we choose 16 evenly spaced values of
+target f and target t from the interval (0, 1), and measure
+the actual fraction and spend against the targets (we in-
+clude only 4 data points each for clarity). For each of the
+256 parameter settings, we run each algorithm on 500 i.i.d.
+samples to average out effects of sampling.
+4.2 Results: Fully Observable Exchange
+The Learn-Then-Bid algorithm waits for a significant ex-
+ploration period before bidding. An obvious improvement
+is the Learn-While-Bid algorithm which continues to learn
+during exploitation: Pm, P ?m, Am and Z
+?
+m are updated after
+each bid, as in Learn-Then-Bid lines 2–5 but with adaptive
+targets. Although harder to analyze, this has the advantage
+of a possibly shorter exploration phase without compromis-
+ing estimation accuracy. We compare the performance of
+these two algorithms experimentally: on average both algo-
+rithms perform very close to ideal. However, Learn-While-
+Bid spending is more tightly concentrated around the ideal
+than Learn-Then-Bid for the same exploration-only phase.
+Figures 2 and 3 show the spending of Learn-Then-Bid
+and Learn-While-Bid respectively. The dotted lines depict
+the minimum spending necessary to achieve the target frac-
+tion of supply as given by max{E [X |X ≤ z?] , t}: when the
+fraction and spend goals cannot simultaneously be satisfied,
+both algorithms prioritize the former while minimizing over
+spending. The distribution of each algorithm’s spending, for
+each (f, t) pair, is summarized by a box-and-whisker plot:
+each box depicts the 25%, 50% (the median) and 75% quan-
+tiles representing the spread of spending. As is evident in the
+figures, more runs of Learn-While-Bid have spend close to
+the ideal. To achieve comparable concentration with Learn-
+Then-Bid, m must be increased. However this can lead to
+infeasibility for high f (e.g. for m = 1, 000 and f = 0.94 the
+problem becomes infeasible leading to underdelivery). Fig-
+ure 4 plots the performance of the algorithms with respect
+to supply. Both algorithms win close to the target fraction
+of supply for a wide range of target spending goals.
+Figure 5 compares theory and practice, depicting our bou-
+nds on the concentration of the fraction of supply won and
+the spending per impression won, with respect to increasing
+exploration length. As exploration increases, the bounds
+become tighter but at the same time the problem becomes
+harder to satisfy until it becomes infeasible (occurring at
+the maximum m shown). Also shown are empirical results
+for running Learn-Then-Bid. In particular for each m value
+(exploration phase length), Learn-Then-Bid was run 1, 000
+times. For each run the fraction won during exploitation,
+and the spend per impression won, were calculated and the
+95% two-sided quantiles were computed and overlayed. In
+this case the distribution-free theory matches the empirical
+results well, particularly for concentration of fraction won.
+8We note that increasing the variance of the log-normal
+distribution does not affect our algorithms’ behavior; they
+deliver the same supply and actually overspend less (since
+there is a larger fraction of lower-priced impressions).
+WWW 2009 MADRID! Track: Internet Monetization / Session: Web Monetization
+258
+0.0 0.2 0.4 0.6 0.8 1.0
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Target Spend Per Impression Won  t
+Actu
+al Sp
+end 
+Per 
+Impr
+essio
+n Wo
+n
+l l l
+l
+l
+l
+l
+l
+l
+l
+l
+l
+l
+l
+l
+l
+idealf = 0.059f = 0.353f = 0.647f = 0.941
+l
+Figure 2: Actual & ideal spend per impression won
+by Learn-Then-Bid with m = 100 for 4 values of f .
+0.0 0.2 0.4 0.6 0.8 1.0
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Target Spend Per Impression Won  t
+Actu
+al Sp
+end 
+Per 
+Impr
+essio
+n Wo
+n
+l l l
+l
+l
+l
+l
+l
+l
+l
+l
+l
+l
+l
+l
+l
+idealf = 0.059f = 0.353f = 0.647f = 0.941
+l
+Figure 3: Actual & ideal spend per impression won
+by Learn-While-Bid with m = 100 for 4 values of f .
+0.0 0.2 0.4 0.6 0.8 1.0
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Target Fraction of Impressions  f
+Atta
+ined
+ Fra
+ction
+ of Im
+pres
+sion
+s
+LTBLWBt = 0.059t = 0.353t = 0.647t = 0.941ideal
+Figure 4: Fraction of supply won by Learn-Then-Bid
+and Learn-While-Bid with m = 100 for 4 values of t.
+1000 2000 3000 4000
+0
+1
+2
+3
+4
+5
+6
+7
+Exploration Duration m
+Spen
+ding
+ Per 
+Impr
+essio
+n Wo
+n
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Frac
+tion 
+Won
+ Dur
+ing E
+xploi
+tatio
+n
+IdealTheoryExperiment
+Supply
+Spend
+Figure 5: Learn-Then-Bid supply and spend 95%
+confidence bands given by: the concentration
+bounds, and 1,000-sample empirical quantiles.
+4.3 Results: Partially Observable Exchange
+In this section we evaluate algorithms for bidding in a par-
+tially observable exchange. The Guess-Double-Panic algo-
+rithm outperforms the strawman bidders in terms of target
+spend for a wide range of target supply fractions. More in-
+terestingly, the lack of full information does not handicap
+the Guess-Double-Panic algorithm: the accuracy of supply
+and spend are very close to those for full information.
+Figures 6 and 7 plot the supply and spend for Guess-
+Double-Panic as well as two strawman algorithms, Max-
+Then-Bid and Bid-Two-t. Given that Learn-Then-Bid per-
+forms well even for very short exploration phases, it is natu-
+ral to apply the same idea in the partially observable setting:
+Max-Then-Bid bids b in the length m exploration phase and
+then exploits based on the empirical distribution.9
+While Max-Then-Bid performs well on supply it is an in-
+ferior strategy for target spend, since the spending during
+exploration can be very high: specifically when f and t are
+both small the algorithm must acquire the right number of
+9Max-Then-Bid dominates Learn-Then-Bid in number of
+impressions acquired despite partial information: Max-
+Then-Bid wins every impression during exploration in con-
+trast to Learn-Then-Bid which wins zero. Also, if the prob-
+lem is feasible after Learn-Then-Bid ’s exploration then it
+will be feasible for Max-Then-Bid.
+WWW 2009 MADRID! Track: Internet Monetization / Session: Web Monetization
+259
+0.0 0.2 0.4 0.6 0.8 1.00
+.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Target Fraction of Impressions  f
+Atta
+ined
+ Frac
+tion 
+of Im
+pres
+sion
+s
+l l l l l l l l l l l l l l l l
+l
+l
+l
+l
+l
+l
+l
+l l l l l l l l l
+l
+l
+l
+l
+l l l l
+l
+l l
+l
+t = 0.059t = 0.353t = 0.647t = 0.941BTTMTBGDPideal
+Figure 6: Fraction of supply won by Bid-Two-t, Max-
+Then-Bid and Guess-Double-Panic with m = 100 for
+4 values of t.
+0.0 0.2 0.4 0.6 0.8 1.00
+.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Target Spend Per Impression Won  t
+Atta
+ined
+ Spe
+nd P
+er Im
+pres
+sion 
+Won
+l
+l
+l
+l
+l
+l
+l
+l
+l
+l
+l
+l l
+l l
+l
+l
+f = 0.059f = 0.353f = 0.647f = 0.941BTTMTBGDPideal
+Figure 7: Spend per impression won by Bid-Two-
+t, Max-Then-Bid and Guess-Double-Panic with m =
+100 for 4 values of f .
+impressions at a low price, and Max-Then-Bid is very likely
+to overspend. Guess-Double-Panic will perform well pre-
+cisely in this setting due to its more cautious exploration
+starting with a bid of t as opposed to b. This comparison
+is borne out in Figure 7 where Max-Then-Bid overspends
+most dramatically relative to Guess-Double-Panic for the
+lowest target fraction f = 0.059; overspending is evident for
+higher values up to f = 0.59. The Bid-Two-t strawman al-
+gorithm does not perform much better than expected from
+theory, which predicts supply and spend within only a loose
+multiplicative factor of the targets.
+5. CONCLUSIONS
+We study the problem of acquiring a given number of im-
+pressions with a given budget constraint by bidding against
+an unknown distribution. Our approach consists of learn-
+ing the distribution in an exploration phase, and then bid-
+ding according to the empirical distribution of observations
+from exploration. We consider both the fully observable and
+the harder partially observable case, and present algorithms
+with theoretical performance guarantees that also perform
+very well in experimental evaluations against realistic data.
+The experiments indicate that in addition to performing well
+with respect to both constraints, our algorithm for partial
+information does nearly as well as algorithms in the full in-
+formation setting despite the fact that a cost must be paid
+for every sample during exploration. The performance of the
+algorithms improves as the supply increases, and is asymp-
+totically optimal since a longer exploration phase can be
+used for higher accuracy; also, the actual number of impres-
+sions won and the total spend are more tightly concentrated
+around their means as n increases.
+The most interesting direction for further research is re-
+moving the i.i.d. assumption, and considering a game theo-
+retic perspective: we assume that every other bidder in each
+individual auction has unit demand and therefore bids his
+value; one can instead consider best response and equilib-
+rium analysis when a number of bidding agents compete in
+such a marketplace.
+Acknowledgements
+We gratefully acknowledge the support of the NSF through
+grant DMS-0707060.
+6. REFERENCES
+[1] P. Auer, N. Cesa-Bianchi, and P. Fischer. Finite-time
+analysis of the multi-armed bandit problem. Machine
+Learning, 47:235–256, 2002.
+[2] M. Cary, A. Das, B. Edelman, I. Giotis, K. Heimerl,
+A. Karlin, C. Mathieu, and M. Schwarz. Greedy
+bidding strategies for keyword auctions. In EC ’07:
+Proceedings of the 8th ACM Conference on Electronic
+Commerce, pages 262–271, 2007.
+[3] N. Cesa-Bianchi and G. Lugosi. Prediction, Learning,
+and Games. Cambridge University Press, 2006.
+[4] A. Dvoretzky, J. Kiefer, and J. Wolfowitz. Asymptotic
+minimax character of the sample distribution function
+and of the classical multinomial estimator. Annals of
+Mathematical Statistics, 27(3):642–669, 1956.
+[5] N. Littlestone and M. K. Warmuth. The weighted
+majority algorithm. Information and Computation,
+108(2):212–261, February 1994.
+[6] M. Zinkevich. Online convex programming and
+generalized infinitesimal gradient ascent. In Proceedings
+of the Twentieth International Conference on Machine
+Learning, pages 928–936, 2003.
+WWW 2009 MADRID! Track: Internet Monetization / Session: Web Monetization
+260
