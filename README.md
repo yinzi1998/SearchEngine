@@ -9,7 +9,7 @@
 >index_author：按照作者搜索的索引<br>
 >index_content：按照内容搜索的索引<br>
 >index_title：按照标题搜索的索引<br>
-#### WebContent：存放项目前端文件夹，里面的文件内容如下
+#### WebContent：存放前端页面实现代码及其他文件
 >META-INF：系统信息文件夹<br>
 >WEB-INF：存放项目使用的jar包<br>
 >css：存放前端元素排版文件<br>
